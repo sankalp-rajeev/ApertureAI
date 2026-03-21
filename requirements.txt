@@ -26,6 +26,11 @@ streamlit>=1.25.0
 # Experiment Tracking
 mlflow>=2.5.0
 
+# Inference Optimization (ONNX + OpenVINO)
+onnx>=1.14.0
+onnxruntime>=1.15.0
+openvino>=2024.0.0
+
 # Utilities
 tqdm>=4.65.0
 Pillow>=10.0.0

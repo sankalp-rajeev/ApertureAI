@@ -9,6 +9,10 @@ data/preprocessed/
 # Model checkpoints
 models/*.pth
 models/*.pt
+models/*.onnx
+models/*.xml
+models/*.bin
+models/openvino/
 
 # Python
 __pycache__/

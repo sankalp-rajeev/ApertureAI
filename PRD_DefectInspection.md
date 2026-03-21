@@ -4,7 +4,7 @@
 | Field | Value |
 |---|---|
 | **Author** | Sankalp Rajeev |
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Date** | March 2026 |
 | **Status** | APPROVED FOR BUILD |
 
@@ -30,9 +30,9 @@
 
 ## 1. Executive Summary
 
-This project builds an end-to-end automated visual inspection system for manufacturing defect detection and classification, directly mirroring the engineering challenges faced in Intel's end-of-line singulated package inspection workflows. The system combines a classical OpenCV preprocessing pipeline, a fine-tuned CNN classifier (EfficientNet-B0), an optical degradation simulator grounded in imaging physics, and a Statistical Process Control (SPC) monitoring layer — all surfaced through a Streamlit dashboard.
+This project builds an end-to-end automated visual inspection system for manufacturing defect detection and classification, directly mirroring the engineering challenges faced in Intel's end-of-line singulated package inspection workflows. The system combines a classical OpenCV preprocessing pipeline, a fine-tuned CNN classifier (EfficientNet-B0) exported through an **ONNX → OpenVINO** inference optimization chain, an optical degradation simulator grounded in imaging physics, and a Statistical Process Control (SPC) monitoring layer — all surfaced through a Streamlit dashboard.
 
-> **Scope constraint:** The project is designed to produce exactly **three resume bullets** that collectively cover six of Intel's stated preferred qualifications: machine vision, OpenCV, CNN classification, SPC/process control, data visualization, and DOE-based optics analysis. Everything outside those three bullets is out of scope.
+> **Scope constraint:** The project is designed to produce exactly **three resume bullets** that collectively cover seven of Intel's stated preferred qualifications: machine vision, OpenCV, CNN classification, SPC/process control, data visualization, DOE-based optics analysis, and **production inference optimization (ONNX + OpenVINO)**. Everything outside those three bullets is out of scope.
 
 ---
 
@@ -60,7 +60,9 @@ Every goal maps to a specific resume bullet. If it doesn't appear in a bullet, i
 | Goal | Resume Bullet |
 |---|---|
 | ≥97% top-1 accuracy on NEU 6-class defect dataset | B1 — CNN classifier quantifier |
-| <8ms inference latency per frame (CPU) | B1 — production-grade latency claim |
+| <8ms ONNX Runtime CPU inference latency per frame | B1 — production latency claim |
+| <5ms OpenVINO Runtime CPU inference latency per frame | B1 — Intel-optimized latency claim |
+| Benchmark PyTorch vs ONNX vs OpenVINO latency — report all three | B1 — optimization narrative |
 | Optical DOE: measure F1 degradation across 27 configurations (3 factors × 3 levels) | B2 — DOE quantifier |
 | Quantify PSF resolution threshold at which classifier F1 drops below 90% | B2 — optics/imaging claim |
 | SPC system: zero false escapes across 500-image test run | B3 — SPC quantifier |
@@ -83,7 +85,7 @@ Every goal maps to a specific resume bullet. If it doesn't appear in a bullet, i
 > Everything in this PRD is reverse-engineered from these three bullets. Build only what makes them true and measurable.
 
 **B1:**
-> Engineered an **OpenCV + EfficientNet-B0** defect classification pipeline on the NEU Surface Defect dataset achieving **≥97% top-1 accuracy** across 6 defect classes with **<8ms CPU inference latency** per frame, using CLAHE normalization, adaptive thresholding, and contour-guided ROI extraction.
+> Engineered an **OpenCV + EfficientNet-B0** defect classification pipeline on the NEU Surface Defect dataset achieving **≥97% top-1 accuracy** across 6 defect classes; exported to **ONNX Runtime** (<8ms CPU latency) and **OpenVINO IR** (<5ms on Intel CPU), benchmarking a **[X]x speedup** over baseline PyTorch inference — using CLAHE normalization, adaptive thresholding, and contour-guided ROI extraction.
 
 **B2:**
 > Designed an **optical degradation simulator** modeling PSF convolution (Airy disk, NA 0.1–0.5), Poisson + Gaussian sensor noise, and illumination vignetting; ran a **27-configuration DOE** (3-factor × 3-level), identifying PSF σ as the resolution threshold beyond which F1 degrades by **[measured %]**, informing camera/lens selection trade-offs for high-volume inspection.
@@ -138,7 +140,8 @@ Four independent modules with clean interfaces. Each developed and tested in iso
 | Module | Input | Output | Maps To |
 |---|---|---|---|
 | M1: OpenCV Preprocessor | Raw defect image (200×200) | Cleaned ROI tensor | Bullet 1 |
-| M2: EfficientNet Classifier | Preprocessed tensor | Class label + confidence + Grad-CAM | Bullet 1 |
+| M2a: EfficientNet Classifier (PyTorch) | Preprocessed tensor | Class label + confidence + Grad-CAM | Bullet 1 |
+| M2b: Inference Optimization (ONNX → OpenVINO) | Trained .pth checkpoint | ONNX model + OpenVINO IR + latency benchmark | Bullet 1 |
 | M3: Optical Degradation Simulator | Clean image | Degraded image at specified params | Bullet 2 |
 | M4: SPC Monitor | Batch defect counts (time series) | Control charts + OOC alerts | Bullet 3 |
 | M5: Streamlit Dashboard | All module outputs | Interactive UI | Bullet 3 |
@@ -149,15 +152,19 @@ Four independent modules with clean interfaces. Each developed and tested in iso
 RAW IMAGE
     ↓  [M1] OpenCV Preprocessor
          adaptive_threshold() → morphological_ops() → contour_extract() → ROI crop
-    ↓  [M2] EfficientNet-B0 Classifier
+    ↓  [M2a] EfficientNet-B0 Classifier (PyTorch — training & Grad-CAM)
          forward_pass() → softmax() → grad_cam() → {label, conf, heatmap}
+    ↓  [M2b] Inference Optimization Chain (export & benchmark)
+         PyTorch .pth → torch.onnx.export() → ONNX Runtime
+                                             → OpenVINO Model Optimizer → OpenVINO Runtime
+         benchmark: PyTorch vs ONNX vs OpenVINO latency (1,000 runs, median)
     ↓  [M4] SPC Monitor  (aggregated per batch of 25 frames)
          xbar_chart() → r_chart() → western_electric_rules() → {OOC flag}
     ↓  [M5] Streamlit Dashboard
-         render heatmaps + control charts + yield tracker + CSV export
+         render heatmaps + control charts + yield tracker + latency comparison + CSV export
 
 PARALLEL PATH:
-[M3] Optical Simulator → degraded images → M1 → M2  (DOE evaluation loop)
+[M3] Optical Simulator → degraded images → M1 → M2b/ONNX  (DOE evaluation loop — use ONNX for speed)
 ```
 
 ---
@@ -233,15 +240,96 @@ Grad-CAM is not optional — it makes the project inspection-relevant by showing
 - Weight feature maps by global average pooled gradients → ReLU → upsample to 200×200
 - Overlay on original image as heatmap — export as PNG for dashboard
 
+#### Inference Optimization — ONNX → OpenVINO (M2b)
+
+This is the chain that makes the latency claims in Bullet 1 credible and production-grade. PyTorch CPU inference is the baseline; ONNX Runtime and OpenVINO are the optimized runtimes. All three are benchmarked and reported.
+
+**Why this chain matters for Intel specifically:** OpenVINO is Intel's own inference toolkit, used internally in their inspection and edge AI products. Demonstrating you know this stack is a non-trivial signal that goes beyond generic ML knowledge.
+
+**Export Pipeline:**
+
+```
+Step 1 — PyTorch → ONNX
+torch.onnx.export(
+    model, dummy_input,
+    "argus_efficientnet.onnx",
+    opset_version=17,
+    input_names=["image"],
+    output_names=["logits"],
+    dynamic_axes={"image": {0: "batch"}}
+)
+
+Step 2 — Validate ONNX
+import onnxruntime as ort
+sess = ort.InferenceSession("argus_efficientnet.onnx", providers=["CPUExecutionProvider"])
+# Verify output matches PyTorch within 1e-4 tolerance
+
+Step 3 — ONNX → OpenVINO IR
+# Using OpenVINO Model Optimizer (mo CLI or Python API)
+from openvino.tools.mo import convert_model
+ov_model = convert_model("argus_efficientnet.onnx")
+# Serialize to .xml + .bin (OpenVINO IR format)
+
+Step 4 — OpenVINO Runtime inference
+from openvino.runtime import Core
+ie = Core()
+model = ie.compile_model("argus_efficientnet.xml", "CPU")
+infer_request = model.create_infer_request()
+```
+
+**Latency Benchmark Protocol:**
+
+```python
+import timeit
+
+N = 1000  # number of runs
+dummy = np.random.randn(1, 3, 224, 224).astype(np.float32)
+
+# PyTorch baseline
+pytorch_ms = timeit.timeit(lambda: model(torch.from_numpy(dummy)), number=N) / N * 1000
+
+# ONNX Runtime
+onnx_ms = timeit.timeit(lambda: sess.run(None, {"image": dummy}), number=N) / N * 1000
+
+# OpenVINO Runtime
+ov_ms = timeit.timeit(lambda: infer_request.infer({"image": dummy}), number=N) / N * 1000
+
+print(f"PyTorch:   {pytorch_ms:.2f}ms")
+print(f"ONNX RT:   {onnx_ms:.2f}ms  ({pytorch_ms/onnx_ms:.1f}x speedup)")
+print(f"OpenVINO:  {ov_ms:.2f}ms  ({pytorch_ms/ov_ms:.1f}x speedup)")
+```
+
+**Engineering Decisions:**
+
+| Decision | Rationale |
+|---|---|
+| ONNX opset 17 over older opsets | Best operator coverage for EfficientNet attention ops; opset 11–13 may miss some ops |
+| CPUExecutionProvider only | Must benchmark on CPU — GPU providers would invalidate the CPU latency claim |
+| Dynamic batch axis | Allows both single-image (latency benchmark) and batch (DOE loop) without re-export |
+| OpenVINO FP32 (no quantization) | INT8 quantization would require calibration dataset and could affect accuracy — out of scope |
+| Validate ONNX output vs PyTorch | Non-negotiable — export bugs can silently produce wrong predictions |
+
+**Tradeoffs Acknowledged:**
+
+| Tradeoff | Decision |
+|---|---|
+| OpenVINO INT8 post-training quantization (PTQ) | Could push to <3ms but risks accuracy drop. FP32 is safer for a first build. |
+| TensorRT (NVIDIA) | Faster on GPU but wrong target — Intel CPU is the deployment story here |
+| TFLite | PyTorch → TF conversion is fragile, adds no resume value over ONNX + OpenVINO |
+
 #### Quantification Targets
 
 | Metric | Target |
 |---|---|
 | Top-1 accuracy (test set) | ≥97% |
 | Per-class F1 (worst class) | ≥94% |
-| CPU inference latency (single image, batch=1) | <8ms |
-| GPU inference throughput | >200 fps (batch=32, T4/A100) |
-| Model size | <25MB |
+| PyTorch CPU latency (baseline, batch=1) | Measure and record — expected ~15–25ms |
+| ONNX Runtime CPU latency (batch=1) | <8ms |
+| OpenVINO Runtime CPU latency (batch=1) | <5ms |
+| Speedup: PyTorch → OpenVINO | Report actual multiplier — expected 3–5x |
+| ONNX vs PyTorch output diff (max abs) | <1e-4 (correctness validation) |
+| Model size (.pth) | <25MB |
+| ONNX model size | ~similar to .pth |
 
 #### Implementation Tasks
 
@@ -258,12 +346,25 @@ Grad-CAM is not optional — it makes the project inspection-relevant by showing
 
 **Task 2.3 — Evaluation**
 - Confusion matrix + per-class precision/recall/F1 on test set
-- CPU latency: `timeit` over 1,000 single-image forward passes — report median
-- Exit criterion: test accuracy ≥97%, CPU latency <8ms
+- PyTorch CPU baseline latency: `timeit` over 1,000 single-image forward passes — report median
+- Exit criterion: test accuracy ≥97%
 
 **Task 2.4 — Grad-CAM**
 - Generate heatmap overlays for 5 samples/class (30 total)
 - Exit criterion: >80% of heatmaps qualitatively highlight defect region, not background
+
+**Task 2.5 — ONNX Export & Validation**
+- Export: `torch.onnx.export` with opset 17, dynamic batch axis, input/output names
+- Validate: run ONNX Runtime on full 270-image test set — compare class labels to PyTorch, max abs logit diff <1e-4
+- Benchmark ONNX Runtime latency: 1,000 runs, report median
+- Exit criterion: zero class-label mismatches vs PyTorch, ONNX latency <8ms
+
+**Task 2.6 — OpenVINO Conversion & Benchmark**
+- Convert: `openvino.tools.mo.convert_model("argus_efficientnet.onnx")` → serialize .xml + .bin
+- Compile for CPU: `ie.compile_model(model, "CPU")`
+- Benchmark OpenVINO Runtime latency: 1,000 runs, report median
+- Save three-way comparison to `results/latency_benchmark.json`: `{pytorch_ms, onnx_ms, openvino_ms, onnx_speedup, openvino_speedup}`
+- Exit criterion: OpenVINO latency <5ms, speedup over PyTorch ≥2x
 
 ---
 
@@ -380,6 +481,7 @@ Ground truth is required to verify zero false escapes. Created synthetically:
 |---|---|---|---|
 | DL Framework | PyTorch 2.x | TensorFlow/Keras | Better Grad-CAM ecosystem; more natural custom training loops |
 | Model | EfficientNet-B0 (torchvision) | timm library | torchvision has no extra dependency; timm flexibility not needed |
+| Inference optimization | ONNX Runtime + OpenVINO | TensorRT, TFLite | ONNX is the universal export format; OpenVINO is Intel's own toolkit — direct JD alignment |
 | Augmentation | albumentations | torchvision transforms | 3–10x faster; more industrial transforms (elastic, grid distortion) |
 | Image processing | OpenCV 4.x | scikit-image | Industry standard for machine vision; faster morphological ops |
 | Optical simulation | NumPy + scipy.ndimage | OpenCV only | scipy gives proper FFT-based MTF filtering; OpenCV lacks frequency domain |
@@ -407,6 +509,7 @@ This section defines how the two primary tools are used at each phase and the ru
 |---|---|---|
 | Phase 1 | `NEUDataset` class boilerplate, augmentation Compose pipeline | CLAHE + contour ROI logic — the resume-relevant preprocessing |
 | Phase 2 | Training loop skeleton, checkpoint saving, confusion matrix plot | Grad-CAM implementation, grayscale weight adaptation, latency benchmark |
+| Phase 2 (export) | `torch.onnx.export` boilerplate, `ort.InferenceSession` setup | Validation logic comparing PyTorch vs ONNX outputs, OpenVINO compile/infer calls, benchmark harness |
 | Phase 3 | `itertools.product` DOE loop, CSV saving boilerplate | Physics derivations for PSF/noise/vignette functions — these must be yours |
 | Phase 4 | Streamlit panel layout, Plotly chart wrappers | Western Electric rules logic, SSIM pre-filter threshold tuning |
 
@@ -465,16 +568,23 @@ drive.mount('/content/drive')
 
 # Install dependencies
 !pip install -q albumentations opencv-python-headless streamlit plotly mlflow statsmodels
+!pip install -q onnx onnxruntime openvino-dev
 
 # Set project root
 import sys
-PROJECT_ROOT = '/content/drive/MyDrive/defect_inspection'
+PROJECT_ROOT = '/content/drive/MyDrive/argus'
 sys.path.insert(0, PROJECT_ROOT)
 
 # Verify GPU
 import torch
 print(f"GPU: {torch.cuda.get_device_name(0)}")
 print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+
+# Verify ONNX + OpenVINO (run in notebooks 02 onward)
+import onnxruntime as ort
+from openvino.runtime import Core
+print(f"ONNX Runtime: {ort.__version__}")
+print(f"OpenVINO available devices: {Core().available_devices}")
 ```
 
 #### Data Persistence Strategy
@@ -483,12 +593,15 @@ Colab sessions reset. Every artifact that takes >5 minutes to produce must be sa
 
 | Artifact | Save Location | When to Save |
 |---|---|---|
-| Preprocessed dataset (cached ROIs) | `drive/defect_inspection/data/preprocessed/` | After Task 1.2 |
-| Best model checkpoint (.pth) | `drive/defect_inspection/models/best_model.pth` | After each epoch if val F1 improves |
-| Training logs (CSV) | `drive/defect_inspection/logs/training_log.csv` | Every epoch |
-| DOE results CSV | `drive/defect_inspection/results/doe_results.csv` | After Task 3.3 |
-| Grad-CAM images | `drive/defect_inspection/results/gradcam/` | After Task 2.4 |
-| SPC validation results | `drive/defect_inspection/results/spc_validation.json` | After Task 4.2 |
+| Preprocessed dataset (cached ROIs) | `drive/argus/data/preprocessed/` | After Task 1.2 |
+| Best model checkpoint (.pth) | `drive/argus/models/best_model.pth` | After each epoch if val F1 improves |
+| Training logs (CSV) | `drive/argus/logs/training_log.csv` | Every epoch |
+| ONNX model | `drive/argus/models/argus_efficientnet.onnx` | After Task 2.6 |
+| OpenVINO IR (.xml + .bin) | `drive/argus/models/openvino/` | After Task 2.7 |
+| Latency benchmark results | `drive/argus/results/latency_benchmark.json` | After Task 2.7 |
+| DOE results CSV | `drive/argus/results/doe_results.csv` | After Task 3.3 |
+| Grad-CAM images | `drive/argus/results/gradcam/` | After Task 2.5 |
+| SPC validation results | `drive/argus/results/spc_validation.json` | After Task 4.2 |
 
 #### GPU Memory Management
 
@@ -516,7 +629,9 @@ with torch.cuda.amp.autocast():
 | Phase 1 — preprocessing pipeline | CPU (no GPU needed) | 5–10 min |
 | Phase 2 — EfficientNet-B0 training (50 epochs, batch=32) | T4 | 15–20 min |
 | Phase 2 — Grad-CAM generation (30 images) | T4 | <2 min |
-| Phase 3 — DOE runner (27 configs × 270 images) | T4 | ~60 sec |
+| Phase 2 — ONNX export + validation | CPU | <2 min |
+| Phase 2 — OpenVINO conversion + benchmark | CPU (local) | <5 min |
+| Phase 3 — DOE runner (27 configs × 270 images, using ONNX) | T4 | ~45 sec |
 | Phase 4 — SPC validation (500 images) | CPU | <2 min |
 | **Total GPU time** | | **~25–30 min** |
 
@@ -527,7 +642,8 @@ with torch.cuda.amp.autocast():
 | Component | Why Local |
 |---|---|
 | Streamlit dashboard | Requires persistent server; Colab tunneling is unreliable |
-| CPU inference benchmarking | Must measure on CPU — Colab would give GPU numbers |
+| ONNX export & OpenVINO benchmark | Must run on your actual CPU — Colab's CPU is not representative of Intel deployment hardware |
+| CPU latency benchmarking (all three runtimes) | Same reason — Colab CPU ≠ your Intel CPU |
 | SSIM pre-filter threshold tuning | Lightweight; no GPU needed |
 | Final MLflow experiment review | Local `mlflow ui` is cleaner than Colab port forwarding |
 
@@ -536,29 +652,33 @@ with torch.cuda.amp.autocast():
 ### 9.3 Repository Structure
 
 ```
-defect-inspection/
+argus/
 ├── data/
-│   ├── raw/                    # NEU dataset (gitignored)
-│   └── preprocessed/           # Cached ROI tensors (gitignored)
+│   ├── raw/                        # NEU dataset (gitignored)
+│   └── preprocessed/               # Cached ROI tensors (gitignored)
 ├── notebooks/
 │   ├── 01_preprocessing_eda.ipynb
 │   ├── 02_training_evaluation.ipynb
 │   ├── 03_optical_doe.ipynb
 │   └── 04_spc_validation.ipynb
 ├── src/
-│   ├── preprocessing.py        # M1 — OpenCV pipeline
-│   ├── model.py                # M2 — EfficientNet + Grad-CAM
-│   ├── optical_simulator.py    # M3 — degradation functions
-│   ├── spc.py                  # M4 — SPC monitor
-│   └── dataset.py              # PyTorch Dataset class
+│   ├── preprocessing.py            # M1 — OpenCV pipeline
+│   ├── model.py                    # M2a — EfficientNet + Grad-CAM
+│   ├── export.py                   # M2b — ONNX export + OpenVINO conversion + benchmark
+│   ├── optical_simulator.py        # M3 — degradation functions
+│   ├── spc.py                      # M4 — SPC monitor
+│   └── dataset.py                  # PyTorch Dataset class
 ├── app/
-│   └── dashboard.py            # M5 — Streamlit app
+│   └── dashboard.py                # M5 — Streamlit app
+├── models/
+│   ├── best_model.pth              # gitignored (too large)
+│   ├── argus_efficientnet.onnx     # gitignored (tracked via MLflow)
+│   └── argus_efficientnet.xml      # OpenVINO IR (+ .bin) — gitignored
 ├── results/
 │   ├── doe_results.csv
 │   ├── spc_validation.json
+│   ├── latency_benchmark.json      # PyTorch vs ONNX vs OpenVINO comparison
 │   └── gradcam/
-├── models/
-│   └── best_model.pth          # gitignored (too large)
 ├── requirements.txt
 └── README.md
 ```
@@ -590,8 +710,10 @@ defect-inspection/
 | 2.1 Model setup | EfficientNet-B0 + grayscale weight adaptation + fc replacement | Forward pass on dummy batch completes |
 | 2.2 Training loop | Mixed precision, AdamW, cosine LR, early stopping. Log to CSV | 50 epochs, no NaN loss |
 | 2.3 Hyperparameter tuning | 3 experiments: LR schedule / label smoothing / augmentation intensity | Val F1 >96% on best config |
-| 2.4 Evaluation | Confusion matrix, per-class F1, CPU latency benchmark | Test accuracy ≥97%, CPU latency <8ms |
+| 2.4 Evaluation | Confusion matrix, per-class F1, PyTorch CPU latency baseline | Test accuracy ≥97% |
 | 2.5 Grad-CAM | 5 samples/class (30 total), overlay heatmaps | >80% heatmaps qualitatively correct |
+| 2.6 ONNX export & validation | `torch.onnx.export` opset 17 → validate predictions on 270-image test set vs PyTorch | Zero class-label mismatches, logit diff <1e-4 |
+| 2.7 OpenVINO conversion & benchmark | ONNX → OpenVINO IR → three-way latency benchmark (1,000 runs each) → save `latency_benchmark.json` | OpenVINO <5ms, ONNX <8ms, speedup ≥2x over PyTorch |
 
 ---
 
@@ -625,7 +747,10 @@ defect-inspection/
 | Metric | Target | How Measured | Bullet |
 |---|---|---|---|
 | Top-1 accuracy | ≥97% | `sklearn.accuracy_score` on 270-image test set | B1 |
-| CPU inference latency | <8ms | `timeit` over 1,000 single-image calls, median | B1 |
+| PyTorch CPU latency (baseline) | Measure & record | `timeit` 1,000 runs, median | B1 |
+| ONNX Runtime CPU latency | <8ms | `timeit` 1,000 runs, median | B1 |
+| OpenVINO Runtime CPU latency | <5ms | `timeit` 1,000 runs, median | B1 |
+| PyTorch → OpenVINO speedup | ≥2x (report actual) | pytorch_ms / openvino_ms | B1 |
 | DOE configurations | 27 | 3 factors × 3 levels full factorial | B2 |
 | Resolution threshold (PSF σ) | Report actual value | First PSF level where mean F1 < 0.90 | B2 |
 | F1 degradation at worst config | Report actual % | Best DOE F1 minus worst DOE F1 | B2 |
@@ -640,7 +765,11 @@ defect-inspection/
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Accuracy target not met (<97%) | Low — NEU is well-studied | More augmentation, longer training. Fallback: report actual number — 94–95% is still strong |
-| CPU latency >8ms | Medium — hardware dependent | Export to ONNX (2–3x CPU speedup). Fallback: report GPU latency + note ONNX path |
+| PyTorch CPU latency already <8ms | Low — expected ~15–25ms | If PyTorch is already fast, ONNX/OpenVINO speedup story weakens. Report all three numbers regardless — the optimization chain is still resume-worthy |
+| ONNX export fails on EfficientNet ops | Low — opset 17 covers all B0 ops | Try opset 13 as fallback. Check ONNX operator support list before export |
+| ONNX predictions don't match PyTorch | Low — standard export is reliable | Debug layer by layer using `onnxruntime` intermediate outputs. Check for in-place ops in model |
+| OpenVINO conversion fails | Medium — version sensitivity | Pin `openvino==2024.x`. Use `mo` CLI as fallback if Python API fails |
+| OpenVINO latency not meaningfully better than ONNX | Medium — depends on CPU | Still report both. Even a 1.5x improvement is honest and defensible. Don't fabricate numbers |
 | DOE shows no significant factor | Very Low — PSF effect is well-established | Report raw F1 curves regardless. Visual trend is interview-defensible even without p<0.05 |
 | SSIM pre-filter misses defects | Medium | Tune threshold conservatively. Fallback: report 70% reduction if needed |
 | Colab session resets mid-training | Medium | Checkpoint every epoch to Drive. Resume from best checkpoint |
@@ -654,10 +783,10 @@ defect-inspection/
 > Fill in bracketed values after running experiments. These paste directly into your LaTeX resume.
 
 **B1:**
-> Engineered an **OpenCV + EfficientNet-B0** defect classification pipeline on the NEU Surface Defect dataset achieving **[X]% top-1 accuracy** across 6 defect classes with **[Y]ms CPU inference latency** per frame, using CLAHE normalization, adaptive thresholding, and contour-guided ROI extraction.
+> Engineered an **OpenCV + EfficientNet-B0** defect classification pipeline on the NEU Surface Defect dataset achieving **[X]% top-1 accuracy** across 6 defect classes; exported to **ONNX Runtime** ([Y]ms) and **OpenVINO IR** ([Z]ms CPU latency), achieving a **[N]x speedup** over baseline PyTorch — using CLAHE normalization, adaptive thresholding, and contour-guided ROI extraction.
 
 **B2:**
-> Designed an **optical degradation simulator** modeling PSF convolution (Airy disk, NA 0.1–0.5), Poisson + Gaussian sensor noise, and illumination vignetting; ran a **27-configuration DOE** (3-factor × 3-level), identifying PSF σ=[Z]px as the resolution threshold beyond which F1 degrades by **[W]%**, informing camera/lens selection trade-offs for high-volume inspection.
+> Designed an **optical degradation simulator** modeling PSF convolution (Airy disk, NA 0.1–0.5), Poisson + Gaussian sensor noise, and illumination vignetting; ran a **27-configuration DOE** (3-factor × 3-level), identifying PSF σ=[A]px as the resolution threshold beyond which F1 degrades by **[B]%**, informing camera/lens selection trade-offs for high-volume inspection.
 
 **B3:**
 > Implemented **Statistical Process Control** (X-bar/R-charts, 4 Western Electric rules) over simulated production batches achieving **zero false escapes** across 500 images; deployed SSIM-based frame pre-filter reducing classifier load by **[V]%** with zero missed defects; surfaced Grad-CAM heatmaps, OOC alerts, and batch yield in a **Streamlit dashboard**.
