@@ -1,0 +1,38 @@
+# Virtual environment
+venv/
+.venv/
+
+# Data (too large for git)
+data/raw/
+data/preprocessed/
+
+# Model checkpoints
+models/*.pth
+models/*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+
+# MLflow
+mlruns/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
