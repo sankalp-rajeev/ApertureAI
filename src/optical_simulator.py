@@ -26,39 +26,31 @@ from scipy import ndimage
 
 # Physics constants
 WAVELENGTH_NM = 550  # Green light
-PIXEL_SIZE_UM = 5.0  # Typical sensor pixel size
+PIXEL_SIZE_UM = 0.5  # PCB inspection camera pixel pitch
 
 
 def compute_psf_sigma(na: float, wavelength_nm: float = WAVELENGTH_NM,
                       pixel_size_um: float = PIXEL_SIZE_UM) -> float:
     """
-    Compute PSF sigma from numerical aperture using Airy disk formula.
+    Compute PSF sigma from numerical aperture.
 
-    The Rayleigh criterion gives the first minimum of the Airy disk at:
-        r = 0.61 * λ / NA
+    Formula: sigma_px = 0.61 * λ / (NA * pixel_size)
 
-    For a Gaussian approximation, sigma ≈ 0.42 * r_airy
+    For λ=550nm, pixel_size=0.5μm:
+        NA=0.5 → σ ≈ 1.3 px
+        NA=0.2 → σ ≈ 3.4 px
+        NA=0.1 → σ ≈ 6.7 px
 
     Args:
         na: Numerical aperture (0.1 to 0.5 typical)
         wavelength_nm: Wavelength in nanometers
-        pixel_size_um: Pixel size in micrometers
+        pixel_size_um: Pixel pitch in micrometers
 
     Returns:
         sigma: PSF sigma in pixels
     """
-    # Convert wavelength to micrometers
     wavelength_um = wavelength_nm / 1000
-
-    # Rayleigh criterion: r_airy = 0.61 * λ / NA (in micrometers)
-    r_airy_um = 0.61 * wavelength_um / na
-
-    # Convert to pixels
-    r_airy_px = r_airy_um / pixel_size_um
-
-    # Gaussian approximation: sigma ≈ 0.42 * r_airy
-    sigma_px = 0.42 * r_airy_px
-
+    sigma_px = 0.61 * wavelength_um / (na * pixel_size_um)
     return sigma_px
 
 
@@ -315,46 +307,47 @@ def validate_degradation_functions():
     # Test 1: apply_psf with sigma=0 returns identical image
     result = apply_psf(test_img, sigma=0)
     assert np.array_equal(result, test_img), "PSF sigma=0 should return identical image"
-    print("  ✓ apply_psf(sigma=0) returns identical image")
+    print("  [PASS] apply_psf(sigma=0) returns identical image")
 
     # Test 2: apply_psf with sigma>0 changes image
     result = apply_psf(test_img, sigma=3)
     assert not np.array_equal(result, test_img), "PSF sigma>0 should blur image"
-    print("  ✓ apply_psf(sigma=3) changes image")
+    print("  [PASS] apply_psf(sigma=3) changes image")
 
     # Test 3: apply_vignette with strength=0 returns identical image
     result = apply_vignette(test_img, strength=0)
     assert np.array_equal(result, test_img), "Vignette strength=0 should return identical image"
-    print("  ✓ apply_vignette(strength=0) returns identical image")
+    print("  [PASS] apply_vignette(strength=0) returns identical image")
 
-    # Test 4: apply_vignette darkens corners
-    result = apply_vignette(test_img, strength=0.25)
+    # Test 4: apply_vignette darkens corners (use uniform image to isolate effect)
+    uniform_img = np.full((100, 100), 128, dtype=np.uint8)
+    result = apply_vignette(uniform_img, strength=0.25)
     center_val = result[50, 50]
     corner_val = result[0, 0]
     assert corner_val < center_val, "Vignette should darken corners"
-    print("  ✓ apply_vignette(strength=0.25) darkens corners")
+    print("  [PASS] apply_vignette(strength=0.25) darkens corners")
 
     # Test 5: apply_noise changes image
     result = apply_noise(test_img, snr_db=20)
     assert not np.array_equal(result, test_img), "Noise should change image"
-    print("  ✓ apply_noise(snr_db=20) changes image")
+    print("  [PASS] apply_noise(snr_db=20) changes image")
 
     # Test 6: apply_dof_blur with offset=0 returns identical image
     result = apply_dof_blur(test_img, z_offset=0)
     assert np.array_equal(result, test_img), "DOF offset=0 should return identical image"
-    print("  ✓ apply_dof_blur(z_offset=0) returns identical image")
+    print("  [PASS] apply_dof_blur(z_offset=0) returns identical image")
 
     # Test 7: Output dtype matches input dtype
     result = apply_all_degradations(test_img, psf_sigma=2, snr_db=30, vignette_strength=0.1)
     assert result.dtype == test_img.dtype, "Output dtype should match input dtype"
-    print("  ✓ Output dtype matches input dtype")
+    print("  [PASS] Output dtype matches input dtype")
 
     # Test 8: DOE configurations
     configs = get_doe_configurations()
     assert len(configs) == 27, f"Expected 27 DOE configs, got {len(configs)}"
-    print("  ✓ get_doe_configurations() returns 27 configs")
+    print("  [PASS] get_doe_configurations() returns 27 configs")
 
-    print("\nAll unit tests passed! ✓")
+    print("\nAll unit tests passed!")
     return True
 
 

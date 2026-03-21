@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApertureAI - Optical Inspection Dashboard</title>
+    <meta name="description" content="Real-time defect classification, SPC monitoring, and DOE analysis for manufacturing inspection.">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+
+<header class="header">
+    <div class="header-inner">
+        <div class="logo">
+            <div class="logo-icon">A</div>
+            <span class="logo-text">ApertureAI</span>
+            <span class="logo-version">v1.0</span>
+        </div>
+        <div class="header-status">
+            <span class="status-dot"></span>
+            <span>ONNX Runtime Active</span>
+        </div>
+    </div>
+</header>
+
+<nav class="tab-nav" aria-label="Dashboard sections">
+    <div class="tab-nav-inner" role="tablist" aria-label="Dashboard sections">
+        <button id="tab-predict" class="tab-btn active" type="button" role="tab" aria-selected="true" aria-controls="panel-predict" tabindex="0" data-tab="predict">Predict</button>
+        <button id="tab-spc" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="panel-spc" tabindex="-1" data-tab="spc">SPC Monitor</button>
+        <button id="tab-doe" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="panel-doe" tabindex="-1" data-tab="doe">DOE Analysis</button>
+        <button id="tab-system" class="tab-btn" type="button" role="tab" aria-selected="false" aria-controls="panel-system" tabindex="-1" data-tab="system">System</button>
+    </div>
+</nav>
+
+<main class="main">
+    <h1 class="sr-only">ApertureAI Optical Inspection Dashboard</h1>
+    <div id="status-region" class="status-banner status-info" role="status" aria-live="polite" hidden></div>
+
+    <section id="panel-predict" class="tab-panel active" role="tabpanel" aria-labelledby="tab-predict">
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Image Classification</h2>
+                    <span class="card-badge badge-blue">EfficientNet-B0</span>
+                </div>
+                <div class="upload-zone" id="upload-zone">
+                    <label for="file-input" class="sr-only">Upload inspection image</label>
+                    <input type="file" id="file-input" accept="image/*">
+                    <div class="upload-icon">UPLOAD</div>
+                    <div class="upload-text">Drop an image here or click to browse</div>
+                    <div class="upload-hint">Supports PNG, JPG, BMP - NEU-DET steel surface images</div>
+                </div>
+                <div class="action-row">
+                    <button class="btn btn-primary" id="predict-btn" disabled>
+                        Classify Image
+                    </button>
+                </div>
+            </div>
+
+            <div class="card prediction-result" id="prediction-result">
+                <div class="card-header">
+                    <h2 class="card-title">Result</h2>
+                    <span class="card-badge badge-green" id="result-badge">N/A</span>
+                </div>
+
+                <div class="prediction-images">
+                    <div>
+                        <img id="original-img" src="" alt="Original image">
+                        <div class="image-label">Original</div>
+                    </div>
+                    <div>
+                        <img id="heatmap-img" src="" alt="Grad-CAM heatmap overlay">
+                        <div class="image-label">Grad-CAM</div>
+                    </div>
+                </div>
+
+                <div class="prob-bar-container" id="prob-bars"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="panel-spc" class="tab-panel" role="tabpanel" aria-labelledby="tab-spc" hidden>
+        <div class="grid-4" id="spc-stats">
+            <div class="stat-card">
+                <div class="stat-value" id="spc-batches">0</div>
+                <div class="stat-label">Total Batches</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="spc-detections">0</div>
+                <div class="stat-label">OOC Detections</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="spc-rate">N/A</div>
+                <div class="stat-label">Detection Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="spc-cl">N/A</div>
+                <div class="stat-label">Centerline</div>
+            </div>
+        </div>
+
+        <div class="grid-2 section-gap">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">X-bar Control Chart</h2>
+                    <button class="btn btn-primary" id="spc-demo-btn">Run 40-Batch Demo</button>
+                </div>
+                <div class="chart-container" id="xbar-chart"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Alert Log</h2>
+                    <span class="card-badge badge-amber" id="alert-count">0 alerts</span>
+                </div>
+                <div class="alert-log" id="alert-log">
+                    <div class="alert-entry ok">Waiting for demo...</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="panel-doe" class="tab-panel" role="tabpanel" aria-labelledby="tab-doe" hidden>
+        <div class="grid-4" id="doe-stats">
+            <div class="stat-card">
+                <div class="stat-value" id="doe-configs">27</div>
+                <div class="stat-label">Configurations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="doe-best">N/A</div>
+                <div class="stat-label">Best F1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="doe-worst">N/A</div>
+                <div class="stat-label">Worst F1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="doe-threshold">3px</div>
+                <div class="stat-label">PSF Threshold</div>
+            </div>
+        </div>
+        <div id="doe-state" class="panel-state status-info" role="status" aria-live="polite" hidden></div>
+
+        <div class="card section-gap">
+            <div class="card-header">
+                <h2 class="card-title">Main Effects</h2>
+                <span class="card-badge badge-blue">3-factor x 3-level</span>
+            </div>
+            <div class="chart-container" id="main-effects-chart"></div>
+        </div>
+
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Interaction Heatmap</h2>
+                </div>
+                <div class="chart-container" id="interaction-chart"></div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Class Sensitivity</h2>
+                </div>
+                <div class="chart-container" id="class-chart"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="panel-system" class="tab-panel" role="tabpanel" aria-labelledby="tab-system" hidden>
+        <div id="system-state" class="panel-state status-info" role="status" aria-live="polite" hidden></div>
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Inference Latency</h2>
+                    <span class="card-badge badge-green">Benchmarked</span>
+                </div>
+                <div class="chart-container" id="latency-chart"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Model Architecture</h2>
+                </div>
+                <table class="metric-table" id="model-table">
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Key Metrics Summary</h2>
+            </div>
+            <table class="metric-table" id="summary-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Target</th>
+                        <th>Actual</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

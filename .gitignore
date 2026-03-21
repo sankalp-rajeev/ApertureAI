@@ -14,6 +14,13 @@ models/*.xml
 models/*.bin
 models/openvino/
 
+.agents/
+skills-lock.json
+results/
+CONTEXT.md
+.impeccable.md
+CLAUDE.md
+
 # Python
 __pycache__/
 *.py[cod]
