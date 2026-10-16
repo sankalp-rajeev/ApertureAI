@@ -1,7 +1,8 @@
-# ApertureAI: Technical Implementation Report
+# ApertureAI — Industrial Visual Inspection Platform
 
-ApertureAI is an end-to-end machine vision system for industrial surface defect inspection.  
-This document describes what was implemented, how each subsystem works, and what was achieved.
+End-to-end machine vision system for industrial surface defect
+inspection, inference optimization, explainability, and process
+drift monitoring.
 
 ![ApertureAI Dashboard](image.png)
 
